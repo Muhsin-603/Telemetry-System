@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     start_time BIGINT,
+    end_time BIGINT,
+    duration_seconds INT DEFAULT 0,
     os_info TEXT,
     FOREIGN KEY(user_id) REFERENCES users(user_id)
 );

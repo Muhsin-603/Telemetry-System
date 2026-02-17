@@ -1,0 +1,20 @@
+# OS files
+.DS_Store
+
+# Environments
+venv/
+.env
+backend/.env
+visualizer/.env
+
+# Build outputs
+target/
+*.class
+*.jar
+
+# Python caches
+**/__pycache__/
+
+# App specific
+backend/pycache
+visualizer/output/

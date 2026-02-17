@@ -6,8 +6,13 @@ from mysql.connector import Error, pooling
 import time
 import os
 import sys
+from urllib.parse import urlparse, parse_qs
 
-PORT = 8090
+# Import shared configuration from the project root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import var
+
+PORT = var.SERVER_PORT
 
 # ============================================================================
 # EVENT TYPES - The Vocabulary of Suffering
@@ -31,22 +36,18 @@ VALID_EVENT_TYPES = [
     EventType.DAMAGE_TAKEN
 ]
 
-# Database Configuration with Environment Variable Fallbacks
+# Database Configuration from common var.py
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_NAME', 'telemetry_db'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'Tsdg2@vxh'),
+    'host': var.DB_HOST,
+    'database': var.DB_NAME,
+    'user': var.DB_USER,
+    'password': var.DB_PASSWORD,
     'pool_name': 'telemetry_pool',
     'pool_size': 5
 }
 
 # Config without database for initial setup
-DB_CONFIG_NO_DB = {
-    'host': DB_CONFIG['host'],
-    'user': DB_CONFIG['user'],
-    'password': DB_CONFIG['password']
-}
+DB_CONFIG_NO_DB = var.DB_CONFIG_NO_DB
 
 db_pool = None
 
@@ -79,11 +80,24 @@ def initialize_database():
                 user_id VARCHAR(255),
                 start_time BIGINT,
                 end_time BIGINT,
+                duration_seconds INT DEFAULT 0,
                 os_info TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             )
         """)
-        
+
+        # Migration: Add duration_seconds to sessions if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS duration_seconds INT DEFAULT 0")
+        except:
+            pass # MySQL 8.0.19+ supports ADD COLUMN IF NOT EXISTS, older might not
+
+        # Migration: Add total_playtime to users if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_playtime INT DEFAULT 0")
+        except:
+            pass
+
         # Create Events table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS events (
@@ -168,6 +182,8 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             self.handle_session_end(data)
         elif self.path == '/event':
             self.handle_event(data)
+        elif self.path == '/save/upload':
+            self.handle_save_upload(data)
         elif self.path == '/user/register':
             self.handle_user_register(data)
         elif self.path == '/ingest':
@@ -181,6 +197,8 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(200, {"status": "alive", "pool": db_pool is not None})
         elif self.path == '/events':
             self.handle_get_events()
+        elif self.path.startswith('/leaderboard'):
+            self.handle_get_leaderboard()
         else:
             self.send_json_response(404, {"error": "Endpoint not found"})
     
@@ -222,6 +240,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
         session_id = data.get('session_id')
         user_id = data.get('user_id')
         os_info = data.get('os_info', 'Unknown')
+        starting_total_playtime = data.get('starting_total_playtime')
         
         if not session_id or not user_id:
             self.send_json_response(400, {"error": "session_id and user_id required"})
@@ -238,6 +257,13 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
                 VALUES (%s, %s, %s)
             """, (user_id, 'Player', int(time.time() * 1000)))
             
+            # Sync starting playtime if provided (cloud sync logic)
+            if starting_total_playtime is not None:
+                cursor.execute("""
+                    UPDATE users SET total_playtime = GREATEST(total_playtime, %s)
+                    WHERE user_id = %s
+                """, (starting_total_playtime, user_id))
+            
             # Create session
             cursor.execute("""
                 INSERT INTO sessions (session_id, user_id, start_time, os_info)
@@ -247,7 +273,7 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             conn.commit()
             cursor.close()
             
-            print(f"[OVERSEER] Session started: {session_id}")
+            print(f"[OVERSEER] Session started: {session_id} for user {user_id}")
             self.send_json_response(200, {"status": "session_started", "session_id": session_id})
             
         except Error as e:
@@ -260,6 +286,10 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
     def handle_session_end(self, data):
         """End the current session."""
         session_id = data.get('session_id')
+        playtime_seconds = data.get('playtime_seconds', 0)
+        total_playtime_seconds = data.get('total_playtime_seconds')
+        
+        print(f"[OVERSEER] Session end request: {session_id}, {playtime_seconds}s, Total: {total_playtime_seconds}s")
         
         if not session_id:
             self.send_json_response(400, {"error": "session_id required"})
@@ -270,15 +300,78 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             conn = db_pool.get_connection()
             cursor = conn.cursor()
             
+            # Update session with end time and duration
             cursor.execute("""
-                UPDATE sessions SET end_time = %s WHERE session_id = %s
-            """, (int(time.time() * 1000), session_id))
+                UPDATE sessions SET end_time = %s, duration_seconds = %s WHERE session_id = %s
+            """, (int(time.time() * 1000), playtime_seconds, session_id))
+            
+            # Sync user's total playtime if provided
+            if total_playtime_seconds is not None:
+                # Find user_id from session_id
+                cursor.execute("SELECT user_id FROM sessions WHERE session_id = %s", (session_id,))
+                res = cursor.fetchone()
+                if res:
+                    user_id = res[0]
+                    print(f"[OVERSEER] Updating playtime for user {user_id} to {total_playtime_seconds}")
+                    cursor.execute("""
+                        UPDATE users SET total_playtime = GREATEST(total_playtime, %s)
+                        WHERE user_id = %s
+                    """, (total_playtime_seconds, user_id))
+                else:
+                    print(f"[OVERSEER] Session {session_id} not found in database")
             
             conn.commit()
             cursor.close()
             
-            print(f"[OVERSEER] Session ended: {session_id}")
+            print(f"[OVERSEER] Session ended: {session_id} with duration {playtime_seconds}s")
             self.send_json_response(200, {"status": "session_ended"})
+            
+        except Error as e:
+            print(f"[OVERSEER] DB Error: {e}")
+            self.send_json_response(500, {"error": str(e)})
+        finally:
+            if conn and conn.is_connected():
+                conn.close()
+
+    def handle_save_upload(self, data):
+        """Process game save and sync playtime statistics."""
+        user_id = data.get('user_id')
+        save_data = data.get('save_data', {})
+        
+        if not user_id:
+            self.send_json_response(400, {"error": "user_id required"})
+            return
+            
+        total_playtime_seconds = save_data.get('totalPlaytimeSeconds')
+        
+        conn = None
+        try:
+            conn = db_pool.get_connection()
+            cursor = conn.cursor()
+            
+            # Update save record
+            cursor.execute("""
+                INSERT INTO save_files (user_id, level_data, inventory_data, updated_at)
+                VALUES (%s, %s, %s, %s)
+            """, (
+                user_id,
+                json.dumps(save_data.get('level_data', {})),
+                json.dumps(save_data.get('inventory_data', {})),
+                int(time.time() * 1000)
+            ))
+            
+            # Extract and sync playtime stats if present
+            if total_playtime_seconds is not None:
+                cursor.execute("""
+                    UPDATE users SET total_playtime = GREATEST(total_playtime, %s)
+                    WHERE user_id = %s
+                """, (total_playtime_seconds, user_id))
+            
+            conn.commit()
+            cursor.close()
+            
+            print(f"[OVERSEER] Save stats synced for {user_id}")
+            self.send_json_response(200, {"status": "save_synced", "user_id": user_id})
             
         except Error as e:
             print(f"[OVERSEER] DB Error: {e}")
@@ -347,6 +440,39 @@ class TelemetryHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(200, {"events": events})
             
         except Error as e:
+            self.send_json_response(500, {"error": str(e)})
+        finally:
+            if conn and conn.is_connected():
+                conn.close()
+
+    def handle_get_leaderboard(self):
+        """Fetch game leaderboards."""
+        parsed_url = urlparse(self.path)
+        params = parse_qs(parsed_url.query)
+        category = params.get('category', ['playtime'])[0]
+        
+        conn = None
+        try:
+            conn = db_pool.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            if category == 'playtime':
+                # Rank by total_playtime (DESC)
+                cursor.execute("""
+                    SELECT user_id, username, total_playtime 
+                    FROM users 
+                    ORDER BY total_playtime DESC 
+                    LIMIT 20
+                """)
+                leaderboard = cursor.fetchall()
+                cursor.close()
+                self.send_json_response(200, {"category": category, "leaderboard": leaderboard})
+            else:
+                cursor.close()
+                self.send_json_response(400, {"error": f"Unknown category: {category}"})
+            
+        except Error as e:
+            print(f"[OVERSEER] DB Error: {e}")
             self.send_json_response(500, {"error": str(e)})
         finally:
             if conn and conn.is_connected():
