@@ -1,48 +1,95 @@
 # The Overseer: Telemetry System
 
-The Grand Vision: To build a standalone, engine-agnostic telemetry software that runs silently in the background, archiving game data for analysis.
+The Overseer is a standalone, engine-agnostic telemetry suite designed to collect, archive, and visualize data from game clients silently and efficiently.
 
-## Project Structure
+## 🚀 Key Features
 
-This project is organized into three main components (phases):
+*   **Engine-Agnostic**: Simple HTTP API for Java, Godot, Unity, and more.
+*   **Persistent Tracking**: Automated tracking of career playtime and session durations.
+*   **Cloud Persistence**: Handles game save uploads with stat synchronization.
+*   **Playtime Leaderboards**: Integrated leaderboard endpoint for engagement tracking.
+*   **Heatmap Visualization**: Generate detailed spatial activity maps (Heatmaps) from stored event data.
 
-1. **`overseer/`** (Phase 2): The Python server application.
-   - Listens for telemetry data via HTTP.
-   - Validates incoming JSON payloads.
-   - Writes valid data to the Vault.
+---
 
-2. **`vault/`** (Phase 3): The Database storage.
-   - Contains the MySQL schema.
-   - Stores Users, Sessions, Events, and Save Files.
+## 📂 Repository Structure
 
-3. **`visualizer/`** (Phase 4): The Data Visualization tool.
-   - Reads from the Vault.
-   - Generates heatmaps (PNG images) of death locations/events.
+```text
+/
+├── .env                # Global configuration (Single Source of Truth)
+├── var.py              # Shared configuration module for Python components
+├── backend/            # Python telemetry server (Overseer)
+├── clients/
+│   └── java/           # Maven-compliant Java client implementation
+├── database/           # MySQL schema and storage logic
+├── visualizer/         # Spatial data analysis and heatmap generator
+└── requirements.txt    # Common Python dependencies
+```
 
-4. **`client_integrations/`** (Phase 1): Example implementations for game clients.
-   - Java (LibGDX/LWJGL)
-   - Godot (GDScript)
-   - Unity (C#)
+---
 
-## Getting Started
+## ⚙️ Configuration Variables
 
-### 1. The Overseer (Server)
-Navigate to the `overseer` directory and install dependencies:
-```bash
-cd overseer
+Centralize your settings in the root `.env` file. These variables are managed by `var.py` and used by both the backend and visualizer.
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DB_HOST` | Hostname of your MySQL server | `localhost` |
+| `DB_NAME` | Name of the telemetry database | `telemetry_db` |
+| `DB_USER` | MySQL user with table permissions | `root` |
+| `DB_PASSWORD` | Password for your MySQL database | (Required) |
+| `SERVER_PORT` | Port the Overseer listens on | `8090` |
+| `VISUALIZER_OUTPUT_DIR` | Output directory for generated PNGs | `output` |
+| `VISUALIZER_DEFAULT_EVENT`| Default event type for visualization | `PLAYER_DEATH` |
+
+---
+
+## 🛠️ Getting Started
+
+### 1. Environment Setup (The "venv" Thing)
+It is highly recommended to use a Python virtual environment to keep your global packages clean.
+
+**Window Setup:**
+```powershell
+# Create the environment
+python -m venv venv
+
+# Activate the environment (DO THIS EVERY TIME YOU START WORKING)
+.\venv\Scripts\activate
+
+# Install all necessary libraries
 pip install -r requirements.txt
-# Check server.py to update MySQL credentials
+```
+
+### 2. Configuration
+Copy the template and fill in your MySQL credentials:
+```powershell
+cp .env.example .env
+```
+
+### 3. Database Initialization
+Ensure MySQL is running and execute the schema:
+```powershell
+mysql -u root -p < database/schema.sql
+```
+
+### 4. Running the Backend
+Overseer will initialize tables and start listening for data:
+```powershell
+cd backend
 python server.py
 ```
-The server will start listening on `localhost:8080`.
 
-### 2. The Visualizer
-Navigate to the `visualizer` directory to generate heatmaps:
-```bash
+### 5. Running the Visualizer
+Generate heatmaps of player deaths or stealth breakage:
+```powershell
 cd visualizer
-pip install -r requirements.txt
-python generator.py
+python generator.py --event PLAYER_DEATH
 ```
 
-### 3. The Client
-Check `client_integrations/` for example code to drop into your game project.
+### 6. Java Client Integration
+Build the standard library for your project:
+```bash
+cd clients/java
+mvn clean install
+```

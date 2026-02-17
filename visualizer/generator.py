@@ -5,16 +5,16 @@ from scipy import ndimage
 from scipy.stats import gaussian_kde
 import os
 import argparse
+import sys
 
-OUTPUT_DIR = "output"
+# Import shared configuration from the project root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import var
 
-# Database Configuration - Update these with your MySQL credentials
-DB_CONFIG = {
-    'host': 'localhost',
-    'database': 'telemetry_db',
-    'user': 'root',
-    'password': 'Tsdg2@vxh'  # Match your overseer config
-}
+OUTPUT_DIR = var.VISUALIZER_OUTPUT_DIR
+
+# Database Configuration from common var.py
+DB_CONFIG = var.DB_CONFIG
 
 # Event types matching the server
 EVENT_TYPES = {
