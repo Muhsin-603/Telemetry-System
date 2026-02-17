@@ -7,7 +7,7 @@ import time
 import os
 import sys
 
-PORT = 8080
+PORT = 8090
 
 # ============================================================================
 # EVENT TYPES - The Vocabulary of Suffering
