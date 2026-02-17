@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+
 /**
  * TelemetryClient - The Silent Observer
  * 
@@ -37,6 +38,7 @@ public class TelemetryClient {
     public static final String EVENT_ENEMY_ALERT = "ENEMY_ALERT";
     public static final String EVENT_CHECKPOINT = "CHECKPOINT";
     public static final String EVENT_DAMAGE_TAKEN = "DAMAGE_TAKEN";
+    
 
     // ========================================================================
     // STATE
@@ -233,11 +235,15 @@ public class TelemetryClient {
      * Send data asynchronously (fire and forget).
      */
     private static void sendAsync(String endpoint, String jsonPayload) {
+        try {
         if (executor == null || executor.isShutdown())
             return;
 
         executor.submit(() -> sendSync(endpoint, jsonPayload));
+    } catch (Exception e) {
+       System.err.println("[Telemetry] Connection failed: " + e.getMessage());
     }
+    } 
 
     /**
      * Send data synchronously (blocks until complete).
